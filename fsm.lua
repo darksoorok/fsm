@@ -37,6 +37,7 @@ lib.encoding.default = 'CP1251'
 u8 = lib.encoding.UTF8
 local imgui = require 'imgui'
 local window = imgui.ImBool(false)
+local activate_window = imgui.ImBool(false)
 local sw, sh = getScreenResolution()
 local new_name = imgui.ImBuffer('', 256)
 local new_sum = imgui.ImBuffer('', 256)
@@ -45,6 +46,7 @@ local save = false
 local one_step = imgui.ImBool(false)
 local msg = imgui.ImBool(cfg.main.msg)
 local scr = imgui.ImBool(cfg.main.screen)
+local onstart = imgui.ImBool(cfg.main.onstart)
 local delay = imgui.ImInt(cfg.checker.interval)
 local after = imgui.ImInt(cfg.checker.after_action)
 local select = nil
@@ -112,7 +114,7 @@ checker.getplayers = function()
     if players ~= 'file empty' then 
         local array = {}
         for name, sum in players:gmatch('(%w+_%w+)\\(%d+)') do 
-            if array[name] then
+            if array[name] and checker.state then
                 chatMessage('[WARNING] Никнейм ' .. name .. ' в списке дублируется! Чекер останавливается.', -1)
                 checker.state = false; checker.th:terminate()
             end
@@ -120,7 +122,7 @@ checker.getplayers = function()
         end
         return array
     else
-        if checker.state == true then chatMessage('Файл пуст. Чекер остановлен.') end
+        if checker.state then chatMessage('Файл пуст. Чекер остановлен.') end
         checker.state = false;
         checker.th:terminate();
         return players
@@ -200,16 +202,42 @@ function lib.events.onShowTextDraw(id, data)
 end
 
 function main()
-    while not isSampAvailable() do wait(100) end;
-    if cfg.main.onstart then checker.th:run() end;
-    local ch_last = {}
+    while not isSampAvailable() do wait(100) end
+    while not sampIsLocalPlayerSpawned() do wait(120) end
+    if cfg.main.onstart then checker.th:run() end
+    getListSerialNumber()
     sampRegisterChatCommand('fsm', function()
-        window.v = not window.v ; imgui.Process = window.v
+        if not activate then 
+            activate_window.v = true 
+        else
+            window.v = not window.v; imgui.Process = window.v
+        end
     end)
-    while true do wait(0) imgui.Process = window.v; imgui.LockPlayer = window.v end
+    while true do wait(0) imgui.Process = window.v or activate_window.v; imgui.LockPlayer = window.v or activate_window.v end
 end
 
 function imgui.OnDrawFrame()
+    if activate_window.v then
+        local mySerialNumber = tostring(getSerialNumber())
+        imgui.CenterText = function(text)
+            imgui.SetCursorPosX((imgui.GetWindowWidth() - imgui.CalcTextSize(u8(text)).x)/2)
+            imgui.Text(u8(text))
+        end
+        imgui.ShowCursor = activate_window.v
+        imgui.SetNextWindowSize(imgui.ImVec2(330,250), imgui.Cond.FirstUseEver)
+        imgui.SetNextWindowPos(imgui.ImVec2((sw/2),(sh/2)), imgui.Cond.FirstUseEver, imgui.ImVec2(0.5, 0.5), imgui.WindowFlags.AlwaysAutoResize)
+        imgui.Begin('Fast Send Money', activate_window, imgui.WindowFlags.NoCollapse + imgui.WindowFlags.NoResize + imgui.WindowFlags.NoScrollbar)
+        
+        imgui.CenterText('Ваш компьютер не имеет активации продукта!')
+        imgui.NewLine()
+        imgui.TextWrapped(u8'  Если вы официально приобретали данный скрипт, от вас требуется ещё одно маленькое действие.')
+        imgui.TextWrapped(u8'  Вам необходимо нажать на кнопку ниже и сообщить код, который будет скопирован в буфер обмена (вставить в строку сообщения: CTRL+V).')
+        imgui.NewLine()
+        imgui.BeginChild('serialnumber', imgui.ImVec2(0, 35), true) imgui.CenterText(mySerialNumber) imgui.EndChild()
+        if imgui.Button(u8'Продолжить', imgui.ImVec2(310, 25)) then activate_window.v = false; setClipboardText(mySerialNumber); os.execute('explorer "https://vk.me/sd_scripts"') end
+        if imgui.IsItemHovered() then imgui.BeginTooltip() imgui.TextUnformatted(u8('Нажав на кнопку откроется браузер, где вы попадёте на страницу\nличных сообщений нашего сообщества ВКонтакте.')) imgui.EndTooltip() end
+        imgui.End()
+    end
     if window.v then
         imgui.ShowCursor = window.v
         imgui.SetNextWindowSize(imgui.ImVec2(400,395), imgui.Cond.FirstUseEver)
@@ -231,8 +259,13 @@ function imgui.OnDrawFrame()
         imgui.NewLine()
         imgui.BeginChild('button', imgui.ImVec2(0, 75), true)
             if imgui.Button(u8(select and 'Редактировать' or 'Добавить'), imgui.ImVec2(110, 23)) then
+                local warnings = false
+                if file.read():match(new_name.v .. '\\' .. new_sum.v) and not select then
+                    chatMessage('Ошибка: данная запись уже есть в списке.')
+                    warnings = true
+                end
                 select = nil
-                if new_name.v:match('(.+)') and new_sum.v:match('(%d+)') then
+                if new_name.v:match('(.+)') and new_sum.v:match('(%d+)') and not warnings then
                     if new_name.v == show_by_name then
                         checker.list[show_by_name] = nil
                         checker.save()
@@ -253,6 +286,8 @@ function imgui.OnDrawFrame()
                         checker.list = checker.getplayers()
                         chatMessage(string.format('Добавлена новая запись: %s, сумма: $%d.', var, sum)); new_name.v = ''; new_sum.v = ''
                     end
+                elseif warnings then
+                    new_name.v = ''; new_sum.v = ''
                 else
                     chatMessage('Ошибка: не введён никнейм или сумма.')
                 end
@@ -341,6 +376,7 @@ function imgui.OnDrawFrame()
             imgui.PushItemWidth(200)
             if imgui.SliderInt('##after', after, 60, 180) then cfg.checker.after_action = after.v; end
             if imgui.Checkbox(u8('Скриншот ' .. (cfg.main.screen and 'активен' or 'неактивен')), scr) then cfg.main.screen = scr.v end
+            if imgui.Checkbox(u8((cfg.main.onstart and 'Запускать' or 'Не запускать') .. ' после спавна'), onstart) then cfg.main.onstart = onstart.v end 
             if imgui.Button(u8'Сохранить', imgui.ImVec2(200, 20)) then 
                 cfg.main.pincode = pincode.v
                 lib.ini.save(cfg, 'FSM')
@@ -374,6 +410,17 @@ function sampGetPlayerIdByNickname(nick)
     end
 end
 
+function onWindowMessage(msg, wparam, lparam)
+    if msg == 0x100 or msg == 0x101 then
+        if (wparam == lib.keys.VK_ESCAPE and (window.v or activate_window.v)) and not isPauseMenuActive() then
+            consumeWindowMessage(true, false)
+            if msg == 0x101 then
+                window.v = false; activate_window.v = false
+            end
+        end
+    end
+end
+
 function getSerialNumber()
     local ffi = require("ffi")
     ffi.cdef[[
@@ -393,17 +440,28 @@ function getSerialNumber()
     return serial[0]
 end
 
-function checkSerialNumber()
+function getListSerialNumber()
     local update_file = getWorkingDirectory() .. '\\config\\listSerialNumber.json'
-    listSerialNumber = settings_load({}, update_file)
-    downloadUrlToFile('https://raw.githubusercontent.com/darksoorok/deputy/main/blacklist.json', update_file, function(id, status, p1, p2)
+    local listSerialNumber = settings_load({}, update_file)
+    downloadUrlToFile('https://raw.githubusercontent.com/darksoorok/fsm/main/listSerialNumber.json', update_file, function(id, status, p1, p2)
         if status == 6 then
             local f = io.open(update_file, 'r+')
             if f then
-                local listSerialNumber = settings_load(decodeJson(f:read('a*')), update_file)
+                listSerialNumber = settings_load(decodeJson(f:read('a*')), update_file)
                 f:close()
                 os.remove(update_file)
-                return listSerialNumber
+                if listSerialNumber and listSerialNumber ~= '{}' then
+                    for k, v in pairs(listSerialNumber) do
+                        if tostring(v) == tostring(getSerialNumber()) then
+                            listSerialNumber = '{}'
+                            activate = true
+                            break
+                        end
+                    end
+                else
+                    chatMessage('[WARNING] Не удалось проверить ваш компьютер на наличие покупки продукта.')
+                    thisScript():unload()
+                end
             end
         end
     end)
