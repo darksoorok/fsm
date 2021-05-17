@@ -203,12 +203,13 @@ end
 
 function main()
     while not isSampAvailable() do wait(100) end
-    while not sampIsLocalPlayerSpawned() do wait(120) end
-    if cfg.main.onstart then checker.th:run() end
     getListSerialNumber()
+    while not sampIsLocalPlayerSpawned() do wait(120) end
+    if not activate then chatMessage('Скрипт успешно запущен и активирован. Приятного пользования (/fsm).') end
+    if cfg.main.onstart then checker.th:run() end
     sampRegisterChatCommand('fsm', function()
-        if not activate then 
-            activate_window.v = true 
+        if not activate then
+            activate_window.v = true
         else
             window.v = not window.v; imgui.Process = window.v
         end
@@ -224,7 +225,7 @@ function imgui.OnDrawFrame()
             imgui.Text(u8(text))
         end
         imgui.ShowCursor = activate_window.v
-        imgui.SetNextWindowSize(imgui.ImVec2(330,250), imgui.Cond.FirstUseEver)
+        imgui.SetNextWindowSize(imgui.ImVec2(330,275), imgui.Cond.FirstUseEver)
         imgui.SetNextWindowPos(imgui.ImVec2((sw/2),(sh/2)), imgui.Cond.FirstUseEver, imgui.ImVec2(0.5, 0.5), imgui.WindowFlags.AlwaysAutoResize)
         imgui.Begin('Fast Send Money', activate_window, imgui.WindowFlags.NoCollapse + imgui.WindowFlags.NoResize + imgui.WindowFlags.NoScrollbar)
         
@@ -235,7 +236,9 @@ function imgui.OnDrawFrame()
         imgui.NewLine()
         imgui.BeginChild('serialnumber', imgui.ImVec2(0, 35), true) imgui.CenterText(mySerialNumber) imgui.EndChild()
         if imgui.Button(u8'Продолжить', imgui.ImVec2(310, 25)) then activate_window.v = false; setClipboardText(mySerialNumber); os.execute('explorer "https://vk.me/sd_scripts"') end
-        if imgui.IsItemHovered() then imgui.BeginTooltip() imgui.TextUnformatted(u8('Нажав на кнопку откроется браузер, где вы попадёте на страницу\nличных сообщений нашего сообщества ВКонтакте.')) imgui.EndTooltip() end
+        imgui.Hint(u8'Нажав на кнопку откроется браузер, где вы попадёте на страницу личных сообщений нашего сообщества ВКонтакте.', 0)
+        if imgui.Button(u8'Перезапустить', imgui.ImVec2(310, 25)) then thisScript():reload() end
+        
         imgui.End()
     end
     if window.v then
@@ -366,17 +369,23 @@ function imgui.OnDrawFrame()
         if imgui.BeginPopupModal(u8'Настройки', _, imgui.WindowFlags.NoCollapse + imgui.WindowFlags.NoResize + imgui.WindowFlags.NoMove) then
             imgui.AlignTextToFramePadding()
             imgui.Text(u8'Пин-код от банка:')
+            imgui.Hint(u8'Требуется для автоматического ввода пин-кода от банковской карточки.')
             imgui.SameLine(); imgui.PushItemWidth(80)
             imgui.InputText('##pincode', pincode)
             if imgui.Checkbox(u8('Сообщения в ' .. (cfg.main.msg and 'чат' or 'консоль')), msg) then cfg.main.msg = msg.v end
+            imgui.Hint(u8('Сообщения от скрипта будут выводится в ' .. (cfg.main.msg and 'чат' or 'консоль SampFuncs') .. '.'), 1.6)
             imgui.Text(u8'Интервал работы чекера (сек):')
+            imgui.Hint(u8('Через каждые ' ..cfg.checker.interval.. ' секунд(-ы) скрипт будет проверять наличие\nигрока из списка в сети.'), 0.1)
             imgui.PushItemWidth(200)
             if imgui.SliderInt('##delay', delay, 1, 60) then cfg.checker.interval = delay.v end
             imgui.Text(u8'Задержка после выдачи (сек):')
+            imgui.Hint(u8'Интервал ожидания после выдачи денежных средств (сервером разрешено раз в минуту переводить деньги).', 0.1)
             imgui.PushItemWidth(200)
             if imgui.SliderInt('##after', after, 60, 180) then cfg.checker.after_action = after.v; end
-            if imgui.Checkbox(u8('Скриншот ' .. (cfg.main.screen and 'активен' or 'неактивен')), scr) then cfg.main.screen = scr.v end
+            if imgui.Checkbox(u8('Автокриншот ' .. (cfg.main.screen and 'активен' or 'неактивен')), scr) then cfg.main.screen = scr.v end
+            imgui.Hint(u8('После перевода денежных средств скрипт сможет самостоятельно сделать скриншот.'), 1.6)
             if imgui.Checkbox(u8((cfg.main.onstart and 'Запускать' or 'Не запускать') .. ' после спавна'), onstart) then cfg.main.onstart = onstart.v end 
+            imgui.Hint(u8('Данная функция запустит чекер сразу после захода в игру.'), 1.6)
             if imgui.Button(u8'Сохранить', imgui.ImVec2(200, 20)) then 
                 cfg.main.pincode = pincode.v
                 lib.ini.save(cfg, 'FSM')
@@ -476,6 +485,36 @@ function settings_load(table, dir)
         local f = io.open(dir, 'r+'); local array = decodeJson(f:read('a*')); f:close()
         if not array then return table end
         return array
+    end
+end
+
+function imgui.Hint(text, delay, action)
+    if imgui.IsItemHovered() then
+        if go_hint == nil then go_hint = os.clock() + (delay and delay or 0.0) end
+        local alpha = (os.clock() - go_hint) * 5
+        if os.clock() >= go_hint then
+            imgui.PushStyleVar(imgui.StyleVar.WindowPadding, imgui.ImVec2(10, 10))
+            imgui.PushStyleVar(imgui.StyleVar.Alpha, (alpha <= 1.0 and alpha or 1.0))
+                imgui.PushStyleColor(imgui.Col.PopupBg, imgui.ImVec4(0.11, 0.11, 0.11, 1.00))
+                    imgui.BeginTooltip()
+                    imgui.PushTextWrapPos(450)
+                    imgui.TextColored(imgui.GetStyle().Colors[imgui.Col.ButtonHovered], u8'Подсказка:')
+                    imgui.TextUnformatted(text)
+                    if action ~= nil then
+                        imgui.TextColored(imgui.GetStyle().Colors[imgui.Col.TextDisabled], '\n'..action)
+                    end
+                    if not imgui.IsItemVisible() and imgui.GetStyle().Alpha == 1.0 then go_hint = nil end
+                    imgui.PopTextWrapPos()
+                    imgui.EndTooltip()
+                imgui.PopStyleColor()
+            imgui.PopStyleVar(2)
+        end
+    end
+end
+
+function onScriptTerminate(LuaScript, quitGame)
+    if LuaScript == thisScript() then
+        if imgui then imgui.ShowCursor = false; showCursor(false) end
     end
 end
 
