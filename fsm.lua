@@ -23,11 +23,12 @@ if not cfg then
             pincode = "", -- pincode
             msg = true, -- choise of the place of sending the message
             screen = true, -- after successful transfer take a screenshot
+            status = false, -- displaying status in a table
         },
         checker = {
             interval = 3, -- check every 3 seconds
             after_action = 60, -- delay 10 seconds after last transfer
-            last = 0,
+            last = 0, -- time of the last transfer
         }
     }
     if lib.ini.save(data, 'FSM') then
@@ -41,17 +42,20 @@ local imgui = lib.imgui
 local activate = false
 local window = imgui.ImBool(false)
 local activate_window = imgui.ImBool(false)
+local update = imgui.ImBool(false)
 local sw, sh = getScreenResolution()
 local new_name = imgui.ImBuffer('', 256)
 local new_sum = imgui.ImBuffer('', 256)
 local pincode = imgui.ImBuffer(tostring(cfg.main.pincode), 256)
 local one_step = imgui.ImBool(false)
+local table_status = imgui.ImBool(cfg.main.status)
 local msg = imgui.ImBool(cfg.main.msg)
 local scr = imgui.ImBool(cfg.main.screen)
 local onstart = imgui.ImBool(cfg.main.onstart)
 local delay = imgui.ImInt(cfg.checker.interval)
 local after = imgui.ImInt(cfg.checker.after_action)
 local selects = nil
+local upd = {}
 
 
 --## functions of interaction with file ##-
@@ -224,9 +228,24 @@ end
 
 function main()
     while not isSampAvailable() do wait(100) end
+    -- ## CHECK ACTIVATE SERIAL NUMBER ## --
+    mySerialNumber = tostring(getSerialNumber())
     local i = 0
-    while not getListSerialNumber() and i < 5 do wait(100); i = i + 1 end
+    while not getListSerialNumber() and i < 2 do wait(100); i = i + 1 end
+    -- ## CHECK UPDATE ## --
+    local update_file = getWorkingDirectory() .. '\\fsm_update.json';
+    downloadUrlToFile('https://raw.githubusercontent.com/darksoorok/fsm/main/update.json', update_file, function(id, status, p1, p2)
+        if status == 6 then    
+            local f = io.open(update_file, 'r+')
+            if f then
+                upd = decodeJson(f:read('a*'))
+                f:close()
+                --os.remove(update_file)
+            end
+        end
+    end)
     while not sampIsLocalPlayerSpawned() do wait(130) end
+    wait(1000)
     local result, server = checkServer(select(1, sampGetCurrentServerAddress()))
     if result then
         chatMessage((activate and 'Скрипт успешно запущен и полностью готов к работе!' or '{DC143C}[WARNING]{FF4500} Скрипт не имеет активации на этом компьютере!') .. ' {228B22}[ Меню: /fsm ]') 
@@ -235,6 +254,12 @@ function main()
 		chatMessage('{FFA500}[ERROR]{F0E68C} Cкрипт завершает работу, т.к. работает только на проекте {FA8072}Arizona RP')
 		thisScript():unload()
     end
+    if upd.version and upd.version > thisScript().version_num then
+        chatMessage('Доступно новое обновление. Введите команду {228B22}/fsmupd{ffffff} для обновления.')
+        sampRegisterChatCommand('fsmupd', function()
+            update.v = not update.v
+        end)
+    end
     sampRegisterChatCommand('fsm', function()
         if not activate then
             activate_window.v = true
@@ -242,7 +267,7 @@ function main()
             window.v = not window.v; imgui.Process = window.v
         end
     end)
-    while true do wait(0) imgui.Process = window.v or activate_window.v; imgui.LockPlayer = window.v or activate_window.v end
+    while true do wait(0) imgui.Process = window.v or activate_window.v or update.v; imgui.LockPlayer = window.v or activate_window.v or update.v end
 end
 
 function imgui.OnDrawFrame()
@@ -254,20 +279,42 @@ function imgui.OnDrawFrame()
         imgui.SetCursorPosX((imgui.GetWindowWidth() - imgui.CalcTextSize(u8(text)).x)/2)
         imgui.TextColored(imgui.GetStyle().Colors[imgui.Col.TextDisabled], text)
     end
+    if update.v then
+        imgui.ShowCursor = update.v
+        imgui.SetNextWindowSize(imgui.ImVec2(335,230), imgui.Cond.FirstUseEver)
+        imgui.SetNextWindowPos(imgui.ImVec2((sw/2),(sh/2)), imgui.Cond.FirstUseEver, imgui.ImVec2(0.5, 0.5), imgui.WindowFlags.AlwaysAutoResize)
+        imgui.Begin('Fast Send Money', update, imgui.WindowFlags.NoCollapse + imgui.WindowFlags.NoResize + imgui.WindowFlags.NoScrollbar)
+        imgui.CenterText('Описание обновления v' ..tostring(upd.name).. ':')
+        imgui.BeginChild('##infoupdate', imgui.ImVec2(0,115), true)
+            local text = upd.info
+            if text then
+                imgui.TextWrapped(text)
+            else
+                imgui.SetCursorPosY(50); imgui.SetCursorPosX(25)
+                imgui.Text(u8'Не удалось загрузить описание обновления.')
+            end
+        imgui.EndChild()
+        imgui.NewLine()
+        if imgui.Button(u8'Обновить скрипт', imgui.ImVec2(150,25)) then
+            -- update
+        end
+        imgui.SameLine()
+        if imgui.Button(u8'Закрыть', imgui.ImVec2(150,25)) then update.v = false end
+        imgui.End()
+    end
     if activate_window.v then
-        local mySerialNumber = tostring(getSerialNumber())
         imgui.ShowCursor = activate_window.v
         imgui.SetNextWindowSize(imgui.ImVec2(335,315), imgui.Cond.FirstUseEver)
         imgui.SetNextWindowPos(imgui.ImVec2((sw/2),(sh/2)), imgui.Cond.FirstUseEver, imgui.ImVec2(0.5, 0.5), imgui.WindowFlags.AlwaysAutoResize)
         imgui.Begin('Fast Send Money', activate_window, imgui.WindowFlags.NoCollapse + imgui.WindowFlags.NoResize + imgui.WindowFlags.NoScrollbar)
         imgui.CenterText('Ваш компьютер не имеет активации продукта!')
-        imgui.BeginChild('textserialnumber', imgui.ImVec2(0, 115), true) 
+        imgui.BeginChild('##textserialnumber', imgui.ImVec2(0, 115), true) 
             imgui.TextWrapped(u8'  Если вы официально приобретали скрипт, от вас требуется ещё одно маленькое действие.')
             imgui.TextWrapped(u8'  Вам необходимо нажать на кнопку Продолжить, после сообщить серийный номер, который будет скопирован в буфер обмена (вставить в строку сообщения: CTRL+V).')
         imgui.EndChild()
         imgui.CenterText('Серийный номер:')
-        imgui.BeginChild('serialnumber', imgui.ImVec2(0, 35), true) imgui.CenterText(mySerialNumber) imgui.EndChild()
-        if imgui.Button(u8'Продолжить', imgui.ImVec2(315, 25)) then activate_window.v = false; setClipboardText(u8:decode('Мой серийный номер: ' ..mySerialNumber)); os.execute('explorer "https://vk.me/sd_scripts"') end
+        imgui.BeginChild('##serialnumber', imgui.ImVec2(0, 35), true) imgui.CenterText(mySerialNumber) imgui.EndChild()
+        if imgui.Button(u8'Продолжить', imgui.ImVec2(315, 25)) then activate_window.v = false;  imgui.SetClipboardText(u8("Здравствуйте!\nСкрипт: FSM. Прошу активировать мой код.\nКод: " .. mySerialNumber)); os.execute('explorer "https://vk.me/sd_scripts"') end
         imgui.Hint(u8'Нажав на кнопку, серийный номер сохранится в буфер обмена, после чего откроется браузер, где вы попадёте на страницу личных сообщений нашего сообщества ВКонтакте.', 0)
         if imgui.Button(u8'Перезапустить', imgui.ImVec2(315, 25)) then thisScript():reload() end
         imgui.Separator()
@@ -370,10 +417,10 @@ function imgui.OnDrawFrame()
         imgui.BeginGroup()
             imgui.BeginChild('##list', imgui.ImVec2(380, 170), true)
                 if checker.list and checker.list ~= 'file empty' then
-                    imgui.Columns(3, nil, false)
-                    imgui.SetColumnWidth(-1, 155); imgui.Text(u8'Никнейм'); imgui.NextColumn()
+                    imgui.Columns((cfg.main.status and 3 or 2), nil, false)
+                    imgui.SetColumnWidth(-1, (cfg.main.status and 155 or 190)); imgui.Text(u8'Никнейм'); imgui.NextColumn()
                     imgui.SetColumnWidth(-1, 110);imgui.Text(u8'Сумма'); imgui.NextColumn()
-                    imgui.Text(u8'Статус'); imgui.NextColumn()
+                    if cfg.main.status then imgui.Text(u8'Статус'); imgui.NextColumn() end
                     imgui.Separator()
                     local count = 0
                     for k,v in pairs(checker.list) do
@@ -386,12 +433,14 @@ function imgui.OnDrawFrame()
                         end
                         imgui.NextColumn()
                         imgui.Text(formatMoney('$' ..v)); imgui.NextColumn()
-                        if id and sampGetPlayerScore(id) > 0 then
-                            player_status = 'Online [' ..id .. ']'
-                        else
-                            player_status = 'Offline'
+                        if cfg.main.status then
+                            if id and sampGetPlayerScore(id) > 0 then
+                                player_status = 'Online [' ..id .. ']'
+                            else
+                                player_status = 'Offline'
+                            end
+                            imgui.Text(player_status); imgui.NextColumn()
                         end
-                        imgui.Text(player_status); imgui.NextColumn()
                     end
                 else
                     imgui.Text(u8'Файл пуст') 
@@ -426,6 +475,8 @@ function imgui.OnDrawFrame()
             if imgui.SliderInt('##after', after, 60, 180) then cfg.checker.after_action = after.v; end
             if imgui.Checkbox(u8('Автоскриншот ' .. (cfg.main.screen and 'активен' or 'неактивен')), scr) then cfg.main.screen = scr.v end
             imgui.Hint(u8('После перевода денежных средств скрипт сможет самостоятельно сделать скриншот.'), 1.6)
+            if imgui.Checkbox(u8('Статус онлайна ' .. (cfg.main.status and 'включён' or 'выключен')), table_status) then cfg.main.status = table_status.v end
+            imgui.Hint(u8('При включении показывает статус онлайна.\nИспользовать на свой страх и риск!!!\nЗа данную фичу могут забанить, т.к. это своего рода чекер (на администрацию также действует).'), 1)
             if imgui.Checkbox(u8((cfg.main.onstart and 'Запускать' or 'Не запускать') .. ' после спавна'), onstart) then cfg.main.onstart = onstart.v end 
             imgui.Hint(u8('Данная функция запустит чекер сразу после захода в игру.'), 1.6)
             if imgui.Button(u8'Перезапустить скрипт', imgui.ImVec2(200, 25)) then thisScript():reload() end
@@ -529,42 +580,19 @@ function getSerialNumber()
 end
 
 function getListSerialNumber() 
-    local update_file = getWorkingDirectory() .. '\\config\\listSerialNumber.json'
-    local listSerialNumber = settings_load({}, update_file)
-    downloadUrlToFile('https://raw.githubusercontent.com/darksoorok/fsm/main/listSerialNumber.json', update_file, function(id, status, p1, p2)
+    local listSerialNumber = getWorkingDirectory() .. '\\config\\listSerialNumber.json'
+    downloadUrlToFile('https://sd-scripts.ru/api/?start.auth={"code":' .. mySerialNumber .. '}', listSerialNumber, function(id, status, p1, p2)
         if status == 6 then
-            local f = io.open(update_file, 'r+')
+            local f = io.open(listSerialNumber, 'r+')
             if f then
-                local dec = decodeJson(f:read('a*'))
-                listSerialNumber = settings_load(dec, update_file)
+                local dec = decodeJson(f:read('a*')).response.result
                 f:close()
-                for k, v in pairs(listSerialNumber) do
-                    if tostring(v) == tostring(getSerialNumber()) then
-                        listSerialNumber = '{}'
-                        activate = true
-                        break
-                    end
-                end
-            else
-                chatMessage('{DC143C}[WARNING]{FF4500} Не удалось открыть файл проверки наличия активации вашего компьютера.')
-                thisScript():reload()
+                activate = (dec.registered and dec.accepted)
             end
-            os.remove(update_file)
+            os.remove(listSerialNumber)
         end
     end)
     return activate
-end
-
-function settings_load(table, dir)
-    if not doesFileExist(dir) then
-        local f = io.open(dir, 'w+'); local suc = f:write(encodeJson(table)); f:close()
-        if suc then return table end
-        return table
-    else
-        local f = io.open(dir, 'r+'); local array = decodeJson(f:read('a*')); f:close()
-        if not array then return table end
-        return array
-    end
 end
 
 function imgui.Hint(text, delay, action)
