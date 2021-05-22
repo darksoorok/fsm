@@ -2,7 +2,7 @@ script_name('Fast Send Money');
 script_author("S&D Scripts");
 script_description('Send money when player online.')
 script_version('1.0')
-script_version_number(1)
+script_version_number(2)
 
 --## loading modules ##--
 local lib = {
